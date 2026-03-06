@@ -43,7 +43,7 @@ class Database:
         self._init()
 
     def _init(self):
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             c.execute("""
                 CREATE TABLE IF NOT EXISTS consultas (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +66,7 @@ class Database:
             c.commit()
 
     def upsert(self, r):
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             c.execute("""
                 INSERT OR REPLACE INTO consultas
                 (dni, nombres, region, provincia, distrito, miembro_mesa,
@@ -85,14 +85,14 @@ class Database:
             c.commit()
 
     def get_all(self):
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             c.row_factory = sqlite3.Row
             return [dict(r) for r in c.execute(
                 "SELECT * FROM consultas ORDER BY id DESC"
             ).fetchall()]
 
     def stats(self):
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             c.row_factory = sqlite3.Row
             row = c.execute("""
                 SELECT COUNT(*) total,
@@ -114,13 +114,13 @@ class Database:
         return True
 
     def clear(self):
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             c.execute("DELETE FROM consultas")
             c.commit()
 
     def pending_dnis(self):
         """DNIs ya consultados, para evitar duplicados."""
-        with sqlite3.connect(self.path) as c:
+        with sqlite3.connect(self.path, check_same_thread=False) as c:
             rows = c.execute("SELECT dni FROM consultas WHERE estado='ok'").fetchall()
             return {r[0] for r in rows}
 
@@ -145,18 +145,28 @@ class ONPEScraper:
         import subprocess
         self.log("Iniciando Google Chrome (undetected)...")
 
-        # Auto-detectar versión de Chrome instalado
-        chrome_ver = 145  # valor por defecto
-        try:
-            out = subprocess.check_output(
-                ['reg', 'query', r'HKLM\SOFTWARE\Google\Chrome\BLBeacon', '/v', 'version'],
-                stderr=subprocess.DEVNULL).decode()
-            ver_str = re.search(r'(\d+)\.\d+', out)
-            if ver_str:
-                chrome_ver = int(ver_str.group(1))
-        except Exception:
-            pass
-        self.log(f"Chrome versión detectada: {chrome_ver}")
+        # Auto-detectar versión de Chrome instalado (HKLM y HKCU)
+        chrome_ver = None
+        for reg_key in [
+            r'HKLM\SOFTWARE\Google\Chrome\BLBeacon',
+            r'HKCU\SOFTWARE\Google\Chrome\BLBeacon',
+            r'HKLM\SOFTWARE\WOW6432Node\Google\Chrome\BLBeacon',
+        ]:
+            try:
+                out = subprocess.check_output(
+                    ['reg', 'query', reg_key, '/v', 'version'],
+                    stderr=subprocess.DEVNULL).decode()
+                ver_str = re.search(r'(\d+)\.\d+', out)
+                if ver_str:
+                    chrome_ver = int(ver_str.group(1))
+                    break
+            except Exception:
+                continue
+
+        if chrome_ver:
+            self.log(f"Chrome versión detectada: {chrome_ver}")
+        else:
+            self.log("No se detectó versión de Chrome, se usará auto-detección.")
 
         # Perfil persistente: guarda cookies/historial entre sesiones (mejora reCAPTCHA)
         profile_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chrome_profile")
@@ -167,11 +177,19 @@ class ONPEScraper:
         if self.headless:
             options.add_argument("--headless=new")
 
-        self._driver = uc.Chrome(
-            options=options,
-            user_data_dir=profile_dir,
-            version_main=chrome_ver,
-        )
+        # Intentar con versión detectada; si falla, reintentar sin forzar versión
+        try:
+            kwargs = dict(options=options, user_data_dir=profile_dir)
+            if chrome_ver:
+                kwargs['version_main'] = chrome_ver
+            self._driver = uc.Chrome(**kwargs)
+        except Exception as e:
+            self.log(f"Primer intento falló ({e}), reintentando sin forzar versión...")
+            self._driver = uc.Chrome(
+                options=options,
+                user_data_dir=profile_dir,
+            )
+
         self._driver.get(ONPE_URL)
         time.sleep(random.uniform(2.0, 3.0))
         self._human_behavior()
@@ -722,15 +740,25 @@ class App:
                     seen.add(d)
                     unique.append(d)
 
-            # Limpiar DB y vista para resultados frescos
-            self.db.clear()
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-            self._refresh_stats()
+            # Preguntar si limpiar BD y vista para resultados frescos
+            existing = self.db.get_all()
+            if existing:
+                limpiar = messagebox.askyesno(
+                    "Base de datos existente",
+                    f"Hay {len(existing)} registros previos en la BD.\n"
+                    "¿Deseas limpiar la BD antes de iniciar?\n\n"
+                    "SÍ = Borrar todo y empezar fresco\n"
+                    "NO = Mantener registros y agregar nuevos")
+                if limpiar:
+                    self.db.clear()
+                    for item in self.tree.get_children():
+                        self.tree.delete(item)
+                    self._refresh_stats()
+                    self._log(f"BD limpiada por solicitud del usuario.")
 
             self.dnis_queue = unique
             self._lbl_count.config(text=f"  DNIs en cola: {len(unique)}")
-            self._log(f"Archivo '{Path(path).name}': {len(unique)} DNIs únicos cargados. BD limpiada.")
+            self._log(f"Archivo '{Path(path).name}': {len(unique)} DNIs únicos cargados.")
             messagebox.showinfo("Archivo cargado",
                                 f"Se encontraron {len(unique)} DNIs únicos.")
         except Exception as e:
@@ -773,6 +801,7 @@ class App:
 
     def _worker(self):
         """Hilo principal de consultas."""
+        import traceback
         scraper = None
         dnis = list(self.dnis_queue)
 
@@ -803,7 +832,7 @@ class App:
                 if not self.running:
                     break
 
-                pct = i / total * 100
+                pct = (i + 1) / total * 100
                 self.root.after(0, lambda p=pct: self._prog_var.set(p))
                 self.root.after(0, lambda i=i, t=total, d=dni:
                     self._prog_lbl.config(
@@ -823,7 +852,8 @@ class App:
                     time.sleep(self._delay_var.get())
 
         except Exception as e:
-            self._log(f"ERROR CRÍTICO: {e}")
+            tb = traceback.format_exc()
+            self._log(f"ERROR CRÍTICO: {e}\n{tb}")
             self.root.after(0, lambda: messagebox.showerror(
                 "Error", f"El proceso falló:\n\n{e}"))
         finally:
