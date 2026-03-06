@@ -184,11 +184,12 @@ class ONPEScraper:
                 kwargs['version_main'] = chrome_ver
             self._driver = uc.Chrome(**kwargs)
         except Exception as e:
-            self.log(f"Primer intento falló ({e}), reintentando sin forzar versión...")
-            self._driver = uc.Chrome(
-                options=options,
-                user_data_dir=profile_dir,
-            )
+            self.log(f"Intento 1 falló ({e}), reintentando sin forzar versión...")
+            try:
+                self._driver = uc.Chrome(options=options, user_data_dir=profile_dir)
+            except Exception as e2:
+                self.log(f"Intento 2 falló ({e2}), iniciando sin perfil...")
+                self._driver = uc.Chrome(options=options)
 
         self._driver.get(ONPE_URL)
         time.sleep(random.uniform(2.0, 3.0))
@@ -206,6 +207,7 @@ class ONPEScraper:
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.common.keys import Keys
 
         r = self._empty_record(dni)
         try:
@@ -224,14 +226,14 @@ class ONPEScraper:
             if not dni_input:
                 raise RuntimeError("No se encontró el campo DNI en la página")
 
-            # ── Mover mouse al input y escribir como humano ──
-            from selenium.webdriver.common.action_chains import ActionChains
-            from selenium.webdriver.common.keys import Keys
+            # ── Click JS en input (activa Angular, evita ElementClickInterceptedException) ──
             time.sleep(random.uniform(0.5, 1.0))
-            # Mover mouse al input y hacer click real
-            ActionChains(self._driver).move_to_element(dni_input).click().perform()
+            self._driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+                dni_input
+            )
             time.sleep(random.uniform(0.2, 0.4))
-            # Seleccionar todo y borrar
+            # Limpiar con teclas para que Angular detecte el cambio
             dni_input.send_keys(Keys.CONTROL + 'a')
             time.sleep(0.1)
             dni_input.send_keys(Keys.DELETE)
@@ -259,11 +261,24 @@ class ONPEScraper:
             if not btn:
                 raise RuntimeError("No se encontró el botón CONSULTAR")
 
+            self._driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            time.sleep(0.3)
             self._driver.execute_script("arguments[0].click();", btn)
-            time.sleep(6)  # Angular necesita tiempo para renderizar
+
+            # Esperar dinámicamente a que ONPE cargue los resultados
+            # (usar textContent para capturar elementos ocultos/animados de Angular)
+            def _results_ready(d):
+                txt = (d.execute_script("return document.body.textContent;") or '').lower()
+                return ('no eres miembro de mesa' in txt or 'sí eres miembro de mesa' in txt
+                        or 'si eres miembro de mesa' in txt
+                        or 'nombres y apellidos' in txt or 'error interno' in txt)
+            try:
+                WebDriverWait(self._driver, 15).until(_results_ready)
+            except Exception:
+                pass  # timeout – extraer lo que haya
 
             # ── Detectar error y reintentar ──
-            body_text = self._driver.find_element(By.TAG_NAME, 'body').text
+            body_text = self._driver.execute_script("return document.body.textContent;") or ''
             if ('error interno' in body_text.lower()
                     or 'volver al inicio' in body_text.lower()):
                 self.log(f"  Error servidor para {dni}, esperando 30s y reintentando...")
@@ -274,25 +289,27 @@ class ONPEScraper:
                 time.sleep(random.uniform(2, 3))
                 dni_input2 = WebDriverWait(self._driver, 20).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[type="tel"]')))
-                self._driver.execute_script("arguments[0].click();", dni_input2)
                 self._driver.execute_script(
-                    "arguments[0].value='';"
-                    "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));",
+                    "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
                     dni_input2)
+                time.sleep(0.3)
+                dni_input2.send_keys(Keys.CONTROL + 'a')
+                time.sleep(0.1)
+                dni_input2.send_keys(Keys.DELETE)
                 time.sleep(0.2)
                 for ch in dni:
                     dni_input2.send_keys(ch)
                     time.sleep(random.uniform(0.07, 0.15))
-                self._driver.execute_script(
-                    "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
-                    dni_input2)
                 time.sleep(random.uniform(1.0, 2.0))
-                WebDriverWait(self._driver, 20).until(
-                    EC.element_to_be_clickable((By.XPATH,
-                        "//button[contains(translate(text(),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'CONSULTAR')]"))
-                )
-                self._driver.execute_script("arguments[0].click();", wait.until(EC.element_to_be_clickable((By.XPATH, "//button"))))
-                time.sleep(10)
+                btn2 = WebDriverWait(self._driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button")))
+                self._driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn2)
+                time.sleep(0.3)
+                self._driver.execute_script("arguments[0].click();", btn2)
+                try:
+                    WebDriverWait(self._driver, 20).until(_results_ready)
+                except Exception:
+                    pass
 
             # ── Extraer datos del DOM ────────
             r = self._extract_from_dom(dni)
@@ -305,11 +322,12 @@ class ONPEScraper:
         return r
 
     def _extract_from_dom(self, dni):
-        """Extrae los datos de la página de resultados."""
+        """Extrae los datos de la página de resultados usando selectores CSS y textContent."""
         from selenium.webdriver.common.by import By
         r = self._empty_record(dni)
         try:
-            body_text = self._driver.find_element(By.TAG_NAME, 'body').text
+            # Usa textContent (captura texto de elementos ocultos/animados de Angular)
+            body_text = self._driver.execute_script("return document.body.textContent;") or ''
 
             if ('error interno' in body_text.lower()
                     or 'volver al inicio' in body_text.lower()):
@@ -317,7 +335,15 @@ class ONPEScraper:
                 r['error_msg'] = 'Error interno del servidor ONPE'
                 return r
 
-            lines  = [l.strip() for l in body_text.splitlines() if l.strip()]
+            # Helper para extraer texto de un selector CSS
+            def _css(selector):
+                try:
+                    el = self._driver.find_element(By.CSS_SELECTOR, selector)
+                    val = el.get_attribute('textContent') or el.text or ''
+                    return val.strip()
+                except Exception:
+                    return ''
+
             body_up = body_text.upper()
 
             # ── Miembro de mesa ──────────────
@@ -326,81 +352,113 @@ class ONPEScraper:
             elif 'SÍ ERES MIEMBRO DE MESA' in body_up or 'SI ERES MIEMBRO DE MESA' in body_up:
                 r['miembro_mesa'] = True
 
-            # ── Nombre ──────────────────────
-            for i, line in enumerate(lines):
-                if re.search(r'nombres?\s*y\s*apellidos?', line, re.I):
-                    for j in range(i+1, min(i+4, len(lines))):
-                        candidate = lines[j]
-                        if len(candidate) > 5 and not candidate.isdigit():
-                            r['nombres'] = candidate
-                            break
-                    break
+            # ── Nombre (selector CSS directo) ──
+            nombre = _css('.apellido')
+            if not nombre:
+                nombre = _css('.nombre-completo')
+            if nombre and not nombre.isdigit() and len(nombre) > 3:
+                r['nombres'] = nombre
 
-            # ── Región / Provincia / Distrito ─
-            for i, line in enumerate(lines):
-                if re.search(r'regi[oó]n\s*/\s*provincia\s*/\s*distrito', line, re.I):
-                    if i+1 < len(lines):
-                        parts = lines[i+1].split('/')
-                        r['region']    = parts[0].strip() if len(parts) > 0 else ''
-                        r['provincia'] = parts[1].strip() if len(parts) > 1 else ''
-                        r['distrito']  = parts[2].strip() if len(parts) > 2 else ''
-                    break
+            # ── Región / Provincia / Distrito (selector CSS directo) ──
+            local_geo = _css('.local')
+            if '/' in local_geo:
+                parts = local_geo.split('/')
+                r['region']    = parts[0].strip() if len(parts) > 0 else ''
+                r['provincia'] = parts[1].strip() if len(parts) > 1 else ''
+                r['distrito']  = parts[2].strip() if len(parts) > 2 else ''
+
+            # ── Fallback: parseo por líneas del textContent ──
+            lines = [l.strip() for l in body_text.splitlines() if l.strip()]
+
+            if not r['nombres']:
+                for i, line in enumerate(lines):
+                    if re.search(r'nombres?\s*y\s*apellidos?', line, re.I):
+                        for j in range(i+1, min(i+4, len(lines))):
+                            candidate = lines[j]
+                            if len(candidate) > 5 and not candidate.isdigit():
+                                r['nombres'] = candidate
+                                break
+                        break
+
             if not r['region']:
-                for line in lines:
-                    parts = line.split('/')
-                    if len(parts) == 3 and all(len(p.strip()) > 2 for p in parts):
-                        if not re.search(r'\d', line):
-                            r['region']    = parts[0].strip()
-                            r['provincia'] = parts[1].strip()
-                            r['distrito']  = parts[2].strip()
-                            break
+                for i, line in enumerate(lines):
+                    if re.search(r'regi[oó]n\s*/\s*provincia\s*/\s*distrito', line, re.I):
+                        if i+1 < len(lines):
+                            parts = lines[i+1].split('/')
+                            r['region']    = parts[0].strip() if len(parts) > 0 else ''
+                            r['provincia'] = parts[1].strip() if len(parts) > 1 else ''
+                            r['distrito']  = parts[2].strip() if len(parts) > 2 else ''
+                        break
+                if not r['region']:
+                    for line in lines:
+                        parts = line.split('/')
+                        if len(parts) == 3 and all(len(p.strip()) > 2 for p in parts):
+                            if not re.search(r'\d', line):
+                                r['region']    = parts[0].strip()
+                                r['provincia'] = parts[1].strip()
+                                r['distrito']  = parts[2].strip()
+                                break
 
             # ── Local de votación ────────────
-            in_local    = False
-            local_lines = []
-            EXCLUIR = re.compile(
-                r'^(ver|ver\s*mapa|mapa|capacítate|capacitate|salir|'
-                r'clv|navegador|oficina|informes|fono|redes|escr)[^\n]{0,30}$', re.I)
-            for line in lines:
-                if re.search(r'^tu\s+local\s+de\s+votaci', line, re.I):
-                    in_local = True
-                    continue
-                if in_local:
-                    if re.search(r'n[°º]\s*(de\s*)?mesa', line, re.I):
-                        break
-                    if line and len(line) > 4 and not EXCLUIR.match(line):
-                        local_lines.append(line)
-            if local_lines:
-                r['local_vot'] = local_lines[0]
-                for l in local_lines[1:]:
-                    if re.search(r'\b(av\.?|jr\.?|calle|psj|pj|ca\.?|mz\.?)\b', l, re.I):
-                        r['direccion'] = l
-                    elif re.search(r'referencia|al costado|frente|esquina', l, re.I):
-                        r['referencia'] = l
+            local_vot = _css('.local-votacion')
+            if not local_vot:
+                local_vot = _css('app-caso-1 .nombre-local')
+            if local_vot:
+                r['local_vot'] = local_vot
+            else:
+                in_local    = False
+                local_lines = []
+                EXCLUIR = re.compile(
+                    r'^(ver|ver\s*mapa|mapa|capacítate|capacitate|salir|'
+                    r'clv|navegador|oficina|informes|fono|redes|escr)[^\n]{0,30}$', re.I)
+                for line in lines:
+                    if re.search(r'^tu\s+local\s+de\s+votaci', line, re.I):
+                        in_local = True
+                        continue
+                    if in_local:
+                        if re.search(r'n[°º]\s*(de\s*)?mesa', line, re.I):
+                            break
+                        if line and len(line) > 4 and not EXCLUIR.match(line):
+                            local_lines.append(line)
+                if local_lines:
+                    r['local_vot'] = local_lines[0]
+                    for l in local_lines[1:]:
+                        if re.search(r'\b(av\.?|jr\.?|calle|psj|pj|ca\.?|mz\.?)\b', l, re.I):
+                            r['direccion'] = l
+                        elif re.search(r'referencia|al costado|frente|esquina', l, re.I):
+                            r['referencia'] = l
 
             # ── N° Mesa ──────────────────────
-            for i, line in enumerate(lines):
-                if re.search(r'n[°º]\s*(de\s*)?mesa', line, re.I):
-                    nums = re.findall(r'\d{4,7}', line)
-                    if nums:
-                        r['nro_mesa'] = nums[-1]
-                    elif i+1 < len(lines):
-                        nums2 = re.findall(r'\d+', lines[i+1])
-                        if nums2:
-                            r['nro_mesa'] = nums2[0]
-                    break
+            mesa_val = _css('.nro-mesa')
+            if mesa_val and re.search(r'\d', mesa_val):
+                r['nro_mesa'] = re.findall(r'\d+', mesa_val)[0]
+            else:
+                for i, line in enumerate(lines):
+                    if re.search(r'n[°º]\s*(de\s*)?mesa', line, re.I):
+                        nums = re.findall(r'\d{4,7}', line)
+                        if nums:
+                            r['nro_mesa'] = nums[-1]
+                        elif i+1 < len(lines):
+                            nums2 = re.findall(r'\d+', lines[i+1])
+                            if nums2:
+                                r['nro_mesa'] = nums2[0]
+                        break
 
             # ── N° Orden ─────────────────────
-            for i, line in enumerate(lines):
-                if re.search(r'n[°º]\s*(de\s*)?orden', line, re.I):
-                    nums = re.findall(r'\d+', line)
-                    if nums:
-                        r['nro_orden'] = nums[-1]
-                    elif i+1 < len(lines):
-                        nums2 = re.findall(r'\d+', lines[i+1])
-                        if nums2:
-                            r['nro_orden'] = nums2[0]
-                    break
+            orden_val = _css('.nro-orden')
+            if orden_val and re.search(r'\d', orden_val):
+                r['nro_orden'] = re.findall(r'\d+', orden_val)[0]
+            else:
+                for i, line in enumerate(lines):
+                    if re.search(r'n[°º]\s*(de\s*)?orden', line, re.I):
+                        nums = re.findall(r'\d+', line)
+                        if nums:
+                            r['nro_orden'] = nums[-1]
+                        elif i+1 < len(lines):
+                            nums2 = re.findall(r'\d+', lines[i+1])
+                            if nums2:
+                                r['nro_orden'] = nums2[0]
+                        break
 
             r['estado'] = 'ok'
 
