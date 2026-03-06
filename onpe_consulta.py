@@ -259,7 +259,7 @@ class ONPEScraper:
             if not btn:
                 raise RuntimeError("No se encontró el botón CONSULTAR")
 
-            btn.click()
+            self._driver.execute_script("arguments[0].click();", btn)
             time.sleep(6)  # Angular necesita tiempo para renderizar
 
             # ── Detectar error y reintentar ──
@@ -274,7 +274,7 @@ class ONPEScraper:
                 time.sleep(random.uniform(2, 3))
                 dni_input2 = WebDriverWait(self._driver, 20).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[type="tel"]')))
-                dni_input2.click()
+                self._driver.execute_script("arguments[0].click();", dni_input2)
                 self._driver.execute_script(
                     "arguments[0].value='';"
                     "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));",
@@ -290,7 +290,8 @@ class ONPEScraper:
                 WebDriverWait(self._driver, 20).until(
                     EC.element_to_be_clickable((By.XPATH,
                         "//button[contains(translate(text(),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'CONSULTAR')]"))
-                ).click()
+                )
+                self._driver.execute_script("arguments[0].click();", wait.until(EC.element_to_be_clickable((By.XPATH, "//button"))))
                 time.sleep(10)
 
             # ── Extraer datos del DOM ────────
@@ -457,7 +458,7 @@ class ONPEScraper:
                 try:
                     el = WebDriverWait(self._driver, 3).until(
                         EC.element_to_be_clickable((By.XPATH, xpath)))
-                    el.click()
+                    self._driver.execute_script("arguments[0].click();", el)
                     time.sleep(random.uniform(2.0, 3.0))
                     self._human_behavior()
                     return
