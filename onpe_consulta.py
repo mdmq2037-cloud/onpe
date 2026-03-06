@@ -272,9 +272,12 @@ class ONPEScraper:
             # (usar textContent para capturar elementos ocultos/animados de Angular)
             def _results_ready(d):
                 txt = (d.execute_script("return document.body.textContent;") or '').lower()
-                return ('no eres miembro de mesa' in txt or 'sí eres miembro de mesa' in txt
-                        or 'si eres miembro de mesa' in txt
-                        or 'nombres y apellidos' in txt or 'error interno' in txt)
+                # SOLO frases únicas de resultados. La página inicial dice
+                # "y si eres miembro de mesa" → NO usar 'si eres miembro de mesa'
+                return ('no eres miembro de mesa' in txt
+                        or 'sí eres miembro de mesa' in txt
+                        or 'nombres y apellidos' in txt
+                        or 'error interno del servidor' in txt)
             try:
                 WebDriverWait(self._driver, 15).until(_results_ready)
             except Exception:
