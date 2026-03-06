@@ -192,9 +192,9 @@ class ONPEScraper:
                 self._driver = uc.Chrome(options=options)
 
         self._driver.get(ONPE_URL)
-        time.sleep(random.uniform(2.0, 3.0))
+        time.sleep(random.uniform(4.0, 6.0))
         self._human_behavior()
-        time.sleep(random.uniform(1.5, 2.5))
+        time.sleep(random.uniform(2.0, 3.0))
         self.log("Navegador listo.")
 
     # ── Consulta de un DNI ────────────────────
@@ -211,14 +211,17 @@ class ONPEScraper:
 
         r = self._empty_record(dni)
         try:
-            wait = WebDriverWait(self._driver, 12)
+            wait = WebDriverWait(self._driver, 25)
 
             # ── Buscar campo DNI ─────────────
+            # Intentar varios selectores con timeout generoso (ONPE SPA puede tardar)
             dni_input = None
             for css in ['input[type="tel"]', 'input[maxlength="8"]',
-                        'input[placeholder*="DNI"]', 'input[placeholder*="dni"]']:
+                        'input[placeholder*="DNI"]', 'input[placeholder*="dni"]',
+                        'input']:
                 try:
-                    dni_input = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, css)))
+                    dni_input = WebDriverWait(self._driver, 25).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, css)))
                     break
                 except Exception:
                     continue
