@@ -853,9 +853,10 @@ class App:
 
         except Exception as e:
             tb = traceback.format_exc()
-            self._log(f"ERROR CRÍTICO: {e}\n{tb}")
-            self.root.after(0, lambda: messagebox.showerror(
-                "Error", f"El proceso falló:\n\n{e}"))
+            err_msg = str(e)
+            self._log(f"ERROR CRÍTICO: {err_msg}\n{tb}")
+            self.root.after(0, lambda m=err_msg: messagebox.showerror(
+                "Error", f"El proceso falló:\n\n{m}"))
         finally:
             if scraper:
                 scraper.stop()
