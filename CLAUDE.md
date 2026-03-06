@@ -1,0 +1,13 @@
+1. Primero, piensa detenidamente en el problema, lee la base de código para identificar los archivos relevantes y escribe un plan en tasks/todo.md.
+2. El plan debe tener una lista de tareas que puedas marcar como completadas a medida que las termines.
+3. Antes de empezar a trabajar, consulta conmigo y verificaré el plan.
+4. Inicializa Git local si no existe (git init) y crea inmediatamente un archivo .gitignore que incluya .env, archivos de configuración con credenciales, y cualquier archivo sensible. Luego crea un commit inicial con el estado actual del proyecto. Antes de cada tarea importante, crea un commit con un mensaje descriptivo. Esto permite revertir cambios fácilmente con git reset o git checkout si algo sale mal.**
+5. Luego, comienza a trabajar en las tareas, marcándolas como completadas a medida que avances.
+6. Por favor, en cada paso, dime solo una explicación de alto nivel de los cambios que hayas realizado.
+7. Haz que cada tarea y cambio de código sea lo más simple posible. Queremos evitar cambios masivos o complejos. Cada cambio debe afectar la menor cantidad de código posible.
+8. Después de completar cada tarea o grupo de tareas relacionadas, haz un commit en Git local con un mensaje claro describiendo los cambios realizados
+9. Finalmente, añade una sección de revisión al archivo todo.md con un resumen de los cambios que hiciste y cualquier otra información relevante.
+10. NO SEAS FLOJO. Nunca seas flojo. SI HAY UN ERROR, ENCUENTRA LA CAUSA RAÍZ Y ARRÉGLALO. NADA DE SOLUCIONES TEMPORALES. ERES UN DESARROLLADOR SENIOR. NUNCA SEAS FLOJO.
+11. HAZ TODAS LAS CORRECCIONES Y CAMBIOS DE CÓDIGO TAN SIMPLES COMO SEA HUMANAMENTE POSIBLE. DEBEN AFECTAR SOLO EL CÓDIGO NECESARIO RELEVANTE A LA TAREA Y NADA MÁS. DEBEN IMPACTAR LA MENOR CANTIDAD DE CÓDIGO POSIBLE. TU OBJETIVO ES NO INTRODUCIR NINGÚN ERROR. TODO SE TRATA DE LA SIMPLICIDAD.
+12. SEGURIDAD CRÍTICA: El control de versiones es SOLO LOCAL con Git. NUNCA subas el repositorio a GitHub o cualquier plataforma remota sin antes verificar conmigo. Siempre crea el archivo .env para claves y contraseñas, y asegúrate de que .env, archivos de credenciales, tokens, API keys y cualquier información sensible estén en .gitignore ANTES del primer commit. Si eventualmente se sube a GitHub, usa un archivo .env.example con valores de ejemplo (nunca reales) para documentar las variables necesarias.
+13. INFORME: Realiza un informe profesional de todo el proyecto que usa que lenguajes backend , frontend y todo lo que se usa en el proyecto  y grabalo en un archivo Informe.md
