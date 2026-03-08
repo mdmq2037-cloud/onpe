@@ -533,7 +533,6 @@ class App:
         self._style()
         self._build()
         self._poll()           # arrancar el loop de actualización GUI
-        self._load_existing()  # cargar registros previos
 
     # ── Estilos ──────────────────────────────
     def _style(self):
