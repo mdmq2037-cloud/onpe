@@ -586,7 +586,7 @@ class App:
         self._ent_dni = ttk.Entry(r2, width=12)
         self._ent_dni.pack(side=tk.LEFT, padx=4)
         self._ent_dni.bind('<Return>', lambda e: self._add_manual())
-        ttk.Button(r2, text="+ Agregar", command=self._add_manual).pack(side=tk.LEFT)
+        ttk.Button(r2, text="▶ Consultar", command=self._add_manual).pack(side=tk.LEFT)
 
         ttk.Separator(r2, orient='vertical').pack(side=tk.LEFT, padx=12, fill=tk.Y)
 
@@ -786,8 +786,8 @@ class App:
 
     def _add_manual(self):
         dni = self._ent_dni.get().strip()
-        if not (7 <= len(dni) <= 9 and dni.isdigit()):
-            messagebox.showwarning("DNI inválido", "El DNI debe tener 7-9 dígitos numéricos.")
+        if not (7 <= len(dni) <= 8 and dni.isdigit()):
+            messagebox.showwarning("DNI inválido", "El DNI debe tener 7 u 8 dígitos numéricos.")
             return
         dni = dni.zfill(8)
         if dni not in self.dnis_queue:
@@ -797,6 +797,9 @@ class App:
         else:
             self._log(f"DNI {dni} ya estaba en cola.")
         self._ent_dni.delete(0, tk.END)
+        # Iniciar automáticamente si no hay consultas en curso
+        if not self.running:
+            self._start()
 
     # ── Iniciar / Detener ─────────────────────
     def _start(self):
