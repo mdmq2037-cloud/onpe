@@ -814,6 +814,10 @@ class App:
         self._btn_start.config(state=tk.DISABLED)
         self._btn_stop.config(state=tk.NORMAL)
 
+        # Limpiar vista antes de cada nueva tanda de consultas
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
         t = threading.Thread(target=self._worker, daemon=True)
         t.start()
 
