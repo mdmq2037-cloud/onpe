@@ -524,11 +524,12 @@ class App:
         self.root.geometry("1200x720")
         self.root.minsize(950, 600)
 
-        self.db         = Database()
-        self.dnis_queue = []
-        self.running    = False
-        self._log_q     = queue.Queue()
-        self._res_q     = queue.Queue()
+        self.db            = Database()
+        self.dnis_queue    = []
+        self.running       = False
+        self._force_manual = False
+        self._log_q        = queue.Queue()
+        self._res_q        = queue.Queue()
 
         self._style()
         self._build()
@@ -789,14 +790,12 @@ class App:
             messagebox.showwarning("DNI inválido", "El DNI debe tener 7 u 8 dígitos numéricos.")
             return
         dni = dni.zfill(8)
-        if dni not in self.dnis_queue:
-            self.dnis_queue.append(dni)
-            self._lbl_count.config(text=f"  DNIs en cola: {len(self.dnis_queue)}")
-            self._log(f"DNI {dni} agregado a la cola.")
-        else:
-            self._log(f"DNI {dni} ya estaba en cola.")
+        # Reemplazar la cola (no acumular) y forzar re-consulta aunque ya exista en BD
+        self.dnis_queue = [dni]
+        self._lbl_count.config(text="  DNIs en cola: 1")
+        self._log(f"Consultando DNI {dni}...")
         self._ent_dni.delete(0, tk.END)
-        # Iniciar automáticamente si no hay consultas en curso
+        self._force_manual = True   # bypass "saltar ya consultados"
         if not self.running:
             self._start()
 
@@ -830,9 +829,11 @@ class App:
         import traceback
         scraper = None
         dnis = list(self.dnis_queue)
+        force = getattr(self, '_force_manual', False)
+        self._force_manual = False
 
-        # Filtrar ya consultados si se eligió esa opción
-        if self._skip_done_var.get():
+        # Filtrar ya consultados (excepto cuando se lanzó desde el botón manual)
+        if not force and self._skip_done_var.get():
             done = self.db.pending_dnis()
             before = len(dnis)
             dnis = [d for d in dnis if d not in done]
